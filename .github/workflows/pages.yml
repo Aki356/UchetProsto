@@ -1,4 +1,4 @@
-name: Deploy static site to GitHub Pages
+name: Build PHP to static and deploy
 on:
   push:
     branches: [ main ]
@@ -14,15 +14,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - name: Render PHP -> static HTML
+        shell: bash
+        run: |
+          set -e
+          REPO_SLUG="UchetProsto"   # <— если имя репо другое, поменяй тут
+
+          # Чистим/готовим dist
+          rm -rf dist && mkdir -p dist
+
+          render_dir () {
+            local SRC_DIR="$1"       # напр. public  или firstPart/public
+            local OUT_DIR="$2"       # напр. dist    или dist/firstPart
+
+            # 1) Рендерим все *.php (кроме api.php) -> *.html с сохранением структуры
+            find "$SRC_DIR" -type f -name '*.php' ! -name 'api.php' | while read -r f; do
+              out="$OUT_DIR/${f#$SRC_DIR/}"         # относительный путь
+              out="${out%.php}.html"                # меняем расширение
+              mkdir -p "$(dirname "$out")"
+              php "$f" > "$out"
+            done
+
+            # 2) Копируем статические файлы (кроме *.php и служебных)
+            rsync -a "$SRC_DIR"/ "$OUT_DIR"/ \
+              --exclude '*.php' \
+              --exclude '.git' --exclude '.github' || true
+          }
+
+          # Главный сайт: public -> dist
+          render_dir "public" "dist"
+
+          # Первая часть: firstPart/public -> dist/firstPart
+          mkdir -p dist/firstPart
+          render_dir "firstPart/public" "dist/firstPart"
+
+          # Добавим <base> для корректных путей (Pages под /<repo>/...)
+          # В корне:
+          find dist -maxdepth 1 -name '*.html' -print0 | while IFS= read -r -d '' file; do
+            sed -i '0,/<head[^>]*>/s//&\n  <base href="\/'"$REPO_SLUG"'\/">/' "$file"
+          done
+          # В папке firstPart:
+          find dist/firstPart -name '*.html' -print0 | while IFS= read -r -d '' file; do
+            sed -i '0,/<head[^>]*>/s//&\n  <base href="\/'"$REPO_SLUG"'\/firstPart\/">/' "$file"
+          done
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
-      - name: Deploy to GitHub Pages
-        id: deployment
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
         uses: actions/deploy-pages@v4
