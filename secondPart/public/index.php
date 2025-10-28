@@ -7,9 +7,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="assets/css/app.css" rel="stylesheet">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  
+  <link rel="icon" href="../../web.png" type="image/svg+xml" sizes="any">
 </head>
 <body>
 <div class="container">
+    <a class="link" href="../../index.php">На главную</a>
   <h1 class="title">База данных (Сделки/Контакты)</h1>
 
   <div class="header-row">

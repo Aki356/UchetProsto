@@ -6,9 +6,11 @@
   <title>База знаний</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="src/css/app.css" rel="stylesheet">
+  <link rel="icon" href="../../web.png" type="image/svg+xml" sizes="any">
 </head>
 <body>
 <div class="container">
+    <a class="link" href="../../index.php">На главную</a>
   <h1 class="title">База знаний</h1>
 
   <div class="header-row">
