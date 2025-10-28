@@ -10,11 +10,10 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: true
 
 env:
-  # Имя репозитория для базового префикса: /<repo>/
   REPO_SLUG: ${{ github.event.repository.name }}
 
 jobs:
@@ -29,61 +28,53 @@ jobs:
         with:
           php-version: '8.2'
 
-      - name: Show repo tree (debug)
-        run: |
-          echo "== top level =="
-          ls -la
-          echo "== dirs (depth<=3) =="
-          find . -maxdepth 3 -type d | sort
-
-      - name: Render PHP -> static HTML (auto-detect public dirs)
+      - name: Render PHP -> static HTML (auto-detect)
         shell: bash
         run: |
           set -euo pipefail
           rm -rf dist && mkdir -p dist
 
-          # Найдём ВСЕ каталоги 'public' (кроме служебных)
+          # Ищем ВСЕ директории public (кроме служебных)
           mapfile -t PUB_DIRS < <(find . -type d -name public \
-            -not -path '*/.git/*' -not -path '*/.github/*' -not -path '*/vendor/*' \
-            -not -path '*/node_modules/*' | sort)
+            -not -path '*/.git/*' -not -path '*/.github/*' \
+            -not -path '*/vendor/*' -not -path '*/node_modules/*' | sort)
+
+          insert_base () {
+            local file="$1" base="$2"
+            # Вставляем <base ...> сразу ПОСЛЕ первого <head ...>
+            awk -v B="$base" '
+              BEGIN{done=0}
+              /<head[^>]*>/ && !done { print; print "  <base href=\"" B "\">"; done=1; next }
+              { print }
+            ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+          }
 
           render_dir () {
-            local SRC_DIR="$1"    # например: public  или firstPart/public
-            local PARENT="${SRC_DIR#./}"
-            PARENT="${PARENT%/public}"       # напр. "" или "firstPart" или "secondPart"
+            local SRC_DIR="$1"
+            local PARENT="${SRC_DIR#./}"; PARENT="${PARENT%/public}"
             local OUT_DIR="dist/${PARENT}"
             mkdir -p "$OUT_DIR"
 
-            echo "::group::Render $SRC_DIR -> $OUT_DIR"
-
             # 1) Рендерим .php (кроме api.php) -> .html
-            #    сохраняем структуру каталогов
             find "$SRC_DIR" -type f -name '*.php' ! -name 'api.php' -print0 | while IFS= read -r -d '' f; do
-              out="$OUT_DIR/${f#$SRC_DIR/}"
-              out="${out%.php}.html"
+              out="$OUT_DIR/${f#$SRC_DIR/}"; out="${out%.php}.html"
               mkdir -p "$(dirname "$out")"
               php "$f" > "$out"
-              echo "render: $f -> $out"
             done
 
             # 2) Копируем статику
             rsync -a "$SRC_DIR"/ "$OUT_DIR"/ \
               --exclude '*.php' --exclude '.git' --exclude '.github' || true
 
-            # 3) Проставим <base href> для GitHub Pages
-            # base: /<repo>/ или /<repo>/<subdir>/
+            # 3) Проставляем корректный <base>
             if [ -z "$PARENT" ]; then
               BASE="/${REPO_SLUG}/"
             else
               BASE="/${REPO_SLUG}/${PARENT}/"
             fi
-            find "$OUT_DIR" -type f -name '*.html' -print0 | while IFS= read -r -d '' file; do
-              # Вставляем <base> сразу после первого <head ...>
-              sed -i '0,/<head[^>]*>/s//&\
-  <base href="'"$BASE"'">/' "$file"
+            find "$OUT_DIR" -type f -name '*.html' -print0 | while IFS= read -r -d '' h; do
+              insert_base "$h" "$BASE"
             done
-
-            echo "::endgroup::"
           }
 
           if [ "${#PUB_DIRS[@]}" -gt 0 ]; then
@@ -91,13 +82,10 @@ jobs:
               render_dir "$d"
             done
           else
-            echo "No 'public' directories found. Fallback: render root index.php if exists."
+            echo "No 'public' dirs found. Fallback: root index.php -> dist/index.html"
             if [ -f "index.php" ]; then
               php index.php > dist/index.html
-              # базовый префикс для корня
-              sed -i '0,/<head[^>]*>/s//&\
-  <base href="\/'"$REPO_SLUG"'\/">/' dist/index.html || true
-              # скопируем всю статику из корня, кроме .php и служебного
+              insert_base dist/index.html "/${REPO_SLUG}/"
               rsync -a ./ dist/ --exclude '*.php' --exclude '.git' --exclude '.github' --exclude 'dist' || true
             else
               echo "No index.php at root. Nothing to deploy." >&2
