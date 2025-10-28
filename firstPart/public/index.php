@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <title>База знаний</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="src/css/app.css" rel="stylesheet">
+  <link href="public/src/css/app.css" rel="stylesheet">
 </head>
 <body>
 <div class="container">
@@ -39,6 +39,6 @@
   </div>
 </div>
 
-<script src="src/js/app.js"></script>
+<script src="public/src/js/app.js"></script>
 </body>
 </html>
