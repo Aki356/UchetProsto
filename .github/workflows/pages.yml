@@ -29,90 +29,94 @@ jobs:
           php-version: '8.2'
 
       - name: Render PHP -> static HTML (auto-detect)
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf dist && mkdir -p dist
+  shell: bash
+  run: |
+    set -euo pipefail
+    rm -rf dist && mkdir -p dist
 
-          # Найдём все каталоги 'public' (кроме служебных)
-          mapfile -t PUB_DIRS < <(find . -type d -name public \
-            -not -path '*/.git/*' -not -path '*/.github/*' \
-            -not -path '*/vendor/*' -not -path '*/node_modules/*' | sort)
+    # Найдём все каталоги 'public' (кроме служебных)
+    mapfile -t PUB_DIRS < <(find . -type d -name public \
+      -not -path '*/.git/*' -not -path '*/.github/*' \
+      -not -path '*/vendor/*' -not -path '*/node_modules/*' | sort)
 
-          insert_base () {
-            local file="$1" base="$2"
-            awk -v B="$base" '
-              BEGIN{done=0}
-              /<head[^>]*>/ && !done { print; print "  <base href=\"" B "\">"; done=1; next }
-              { print }
-            ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
-          }
+    insert_base () {
+      local file="$1" base="$2"
+      awk -v B="$base" '
+        BEGIN{done=0}
+        /<head[^>]*>/ && !done { print; print "  <base href=\"" B "\">"; done=1; next }
+        { print }
+      ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    }
 
-          render_dir () {
-            local SRC_DIR="$1"
-            local PARENT="${SRC_DIR#./}"; PARENT="${PARENT%/public}"
-            local OUT_DIR="dist/${PARENT}"
-            mkdir -p "$OUT_DIR"
+    render_dir () {
+      local SRC_DIR="$1"
+      local PARENT="${SRC_DIR#./}"; PARENT="${PARENT%/public}"
+      local OUT_DIR="dist/${PARENT}"
+      mkdir -p "$OUT_DIR"
 
-            # 1) Рендерим .php (кроме api.php) -> .html
-            find "$SRC_DIR" -type f -name '*.php' ! -name 'api.php' -print0 | while IFS= read -r -d '' f; do
-              out="$OUT_DIR/${f#$SRC_DIR/}"; out="${out%.php}.html"
-              mkdir -p "$(dirname "$out")"
-              php "$f" > "$out"
-            done
+      # 1) Рендерим .php (кроме api.php) -> .html
+      find "$SRC_DIR" -type f -name '*.php' ! -name 'api.php' -print0 | while IFS= read -r -d '' f; do
+        out="$OUT_DIR/${f#$SRC_DIR/}"; out="${out%.php}.html"
+        mkdir -p "$(dirname "$out")"
+        php "$f" > "$out"
+      done
 
-            # 2) Копируем статику
-            rsync -a "$SRC_DIR"/ "$OUT_DIR"/ \
-              --exclude '*.php' --exclude '.git' --exclude '.github' || true
+      # 2) Копируем статику
+      rsync -a "$SRC_DIR"/ "$OUT_DIR"/ \
+        --exclude '*.php' --exclude '.git' --exclude '.github' || true
 
-            # 3) Проставляем корректный <base>
-            if [ -z "$PARENT" ]; then
-              BASE="/${REPO_SLUG}/"
-            else
-              BASE="/${REPO_SLUG}/${PARENT}/"
-            fi
-            find "$OUT_DIR" -type f -name '*.html' -print0 | while IFS= read -r -d '' h; do
-              insert_base "$h" "$BASE"
-            done
-          }
+      # 3) Проставляем корректный <base>
+      if [ -z "$PARENT" ]; then
+        BASE="/${REPO_SLUG}/"
+      else
+        BASE="/${REPO_SLUG}/${PARENT}/"
+      fi
+      find "$OUT_DIR" -type f -name '*.html' -print0 | while IFS= read -r -d '' h; do
+        insert_base "$h" "$BASE"
+      done
+    }
 
-          # Сборка всех разделов
-          if [ "${#PUB_DIRS[@]}" -gt 0 ]; then
-            for d in "${PUB_DIRS[@]}"; do
-              render_dir "$d"
-            done
-          fi
+    # Сборка всех найденных public/
+    if [ "${#PUB_DIRS[@]}" -gt 0 ]; then
+      for d in "${PUB_DIRS[@]}"; do
+        render_dir "$d"
+      done
+    fi
 
-          # Гарантированно создаём корневой index.html (если его нет)
-          if [ ! -f dist/index.html ]; then
-            LINKS=""
-            for d in "${PUB_DIRS[@]}"; do
-              PARENT="${d#./}"; PARENT="${PARENT%/public}"
-              if [ -z "$PARENT" ]; then
-                LINKS="${LINKS}    <li><a href=\"/${REPO_SLUG}/\">Главная</a></li>\n"
-              else
-                LINKS="${LINKS}    <li><a href=\"/${REPO_SLUG}/${PARENT}/\">${PARENT}/</a></li>\n"
-              fi
-            done
+    # ❶ Если в корне репозитория есть ТВОЙ index.html — публикуем его как главный
+    if [ -f index.html ]; then
+      cp index.html dist/index.html
+      # добавим <base>, если его нет
+      if ! grep -qi '<base[^>]*href=' dist/index.html; then
+        insert_base dist/index.html "/${REPO_SLUG}/"
+      fi
+    fi
 
-            {
-              echo '<!doctype html>'
-              echo '<html lang="ru">'
-              echo '<head>'
-              echo '  <meta charset="utf-8">'
-              echo "  <title>${REPO_SLUG}</title>"
-              echo "  <base href=\"/${REPO_SLUG}/\">"
-              echo '  <meta name="viewport" content="width=device-width, initial-scale=1">'
-              echo '  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:840px;margin:40px auto;padding:0 16px}h1{font-size:22px}ul{line-height:1.8}</style>'
-              echo '</head>'
-              echo '<body>'
-              echo '  <h1>Разделы проекта</h1>'
-              echo '  <ul>'
-              printf "%b" "$LINKS"
-              echo '  </ul>'
-              echo '</body></html>'
-            } > dist/index.html
-          fi
+    # ❷ Если после всего ещё нет dist/index.html — создадим "меню" по разделам
+    if [ ! -f dist/index.html ]; then
+      LINKS=""
+      for d in "${PUB_DIRS[@]}"; do
+        PARENT="${d#./}"; PARENT="${PARENT%/public}"
+        if [ -z "$PARENT" ]; then
+          LINKS="${LINKS}    <li><a href=\"/${REPO_SLUG}/\">Главная</a></li>\n"
+        else
+          LINKS="${LINKS}    <li><a href=\"/${REPO_SLUG}/${PARENT}/\">${PARENT}/</a></li>\n"
+        fi
+      done
+      {
+        echo '<!doctype html>'
+        echo '<html lang="ru"><head><meta charset="utf-8">'
+        echo "  <title>${REPO_SLUG}</title>"
+        echo "  <base href=\"/${REPO_SLUG}/\">"
+        echo '  <meta name="viewport" content="width=device-width, initial-scale=1">'
+        echo '  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:840px;margin:40px auto;padding:0 16px}h1{font-size:22px}ul{line-height:1.8}</style>'
+        echo '</head><body>'
+        echo '  <h1>Разделы проекта</h1><ul>'
+        printf "%b" "$LINKS"
+        echo '  </ul></body></html>'
+      } > dist/index.html
+    fi
+
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
