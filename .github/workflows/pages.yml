@@ -41,7 +41,6 @@ jobs:
 
           insert_base () {
             local file="$1" base="$2"
-            # Вставляем <base ...> сразу ПОСЛЕ первого <head ...>
             awk -v B="$base" '
               BEGIN{done=0}
               /<head[^>]*>/ && !done { print; print "  <base href=\"" B "\">"; done=1; next }
@@ -81,16 +80,40 @@ jobs:
             for d in "${PUB_DIRS[@]}"; do
               render_dir "$d"
             done
-          else
-            echo "No 'public' dirs found. Fallback: root index.php -> dist/index.html"
-            if [ -f "index.php" ]; then
-              php index.php > dist/index.html
-              insert_base dist/index.html "/${REPO_SLUG}/"
-              rsync -a ./ dist/ --exclude '*.php' --exclude '.git' --exclude '.github' --exclude 'dist' || true
-            else
-              echo "No index.php at root. Nothing to deploy." >&2
-              exit 1
-            fi
+          fi
+
+          # Если ПОСЛЕ сборки в корне dist нет index.html — сделаем "меню" со ссылками на найденные разделы
+          if [ ! -f dist/index.html ]; then
+            # Сформируем список ссылок из PUB_DIRS
+            LINKS=""
+            for d in "${PUB_DIRS[@]}"; do
+              PARENT="${d#./}"; PARENT="${PARENT%/public}"
+              # Пустой PARENT означает корневой public (в этом случае dist/index.html уже есть, но на всякий создадим линк)
+              if [ -z "$PARENT" ]; then
+                LINKS="${LINKS}<li><a href=\"/${REPO_SLUG}/\">Главная</a></li>\n"
+              else
+                LINKS="${LINKS}<li><a href=\"/${REPO_SLUG}/${PARENT}/\">${PARENT}/</a></li>\n"
+              fi
+            done
+
+            cat > dist/index.html <<HTML
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>${REPO_SLUG}</title>
+  <base href="/${REPO_SLUG}/">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:840px;margin:40px auto;padding:0 16px}h1{font-size:22px}ul{line-height:1.8}</style>
+</head>
+<body>
+  <h1>Разделы проекта</h1>
+  <ul>
+    ${LINKS}
+  </ul>
+</body>
+</html>
+HTML
           fi
 
       - name: Upload artifact
