@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           rm -rf dist && mkdir -p dist
 
-          # Ищем ВСЕ директории public (кроме служебных)
+          # Найдём все каталоги 'public' (кроме служебных)
           mapfile -t PUB_DIRS < <(find . -type d -name public \
             -not -path '*/.git/*' -not -path '*/.github/*' \
             -not -path '*/vendor/*' -not -path '*/node_modules/*' | sort)
@@ -76,44 +76,42 @@ jobs:
             done
           }
 
+          # Сборка всех разделов
           if [ "${#PUB_DIRS[@]}" -gt 0 ]; then
             for d in "${PUB_DIRS[@]}"; do
               render_dir "$d"
             done
           fi
 
-          # Если ПОСЛЕ сборки в корне dist нет index.html — сделаем "меню" со ссылками на найденные разделы
+          # Гарантированно создаём корневой index.html (если его нет)
           if [ ! -f dist/index.html ]; then
-            # Сформируем список ссылок из PUB_DIRS
             LINKS=""
             for d in "${PUB_DIRS[@]}"; do
               PARENT="${d#./}"; PARENT="${PARENT%/public}"
-              # Пустой PARENT означает корневой public (в этом случае dist/index.html уже есть, но на всякий создадим линк)
               if [ -z "$PARENT" ]; then
-                LINKS="${LINKS}<li><a href=\"/${REPO_SLUG}/\">Главная</a></li>\n"
+                LINKS="${LINKS}    <li><a href=\"/${REPO_SLUG}/\">Главная</a></li>\n"
               else
-                LINKS="${LINKS}<li><a href=\"/${REPO_SLUG}/${PARENT}/\">${PARENT}/</a></li>\n"
+                LINKS="${LINKS}    <li><a href=\"/${REPO_SLUG}/${PARENT}/\">${PARENT}/</a></li>\n"
               fi
             done
 
-            cat > dist/index.html <<HTML
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <title>${REPO_SLUG}</title>
-  <base href="/${REPO_SLUG}/">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:840px;margin:40px auto;padding:0 16px}h1{font-size:22px}ul{line-height:1.8}</style>
-</head>
-<body>
-  <h1>Разделы проекта</h1>
-  <ul>
-    ${LINKS}
-  </ul>
-</body>
-</html>
-HTML
+            {
+              echo '<!doctype html>'
+              echo '<html lang="ru">'
+              echo '<head>'
+              echo '  <meta charset="utf-8">'
+              echo "  <title>${REPO_SLUG}</title>"
+              echo "  <base href=\"/${REPO_SLUG}/\">"
+              echo '  <meta name="viewport" content="width=device-width, initial-scale=1">'
+              echo '  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:840px;margin:40px auto;padding:0 16px}h1{font-size:22px}ul{line-height:1.8}</style>'
+              echo '</head>'
+              echo '<body>'
+              echo '  <h1>Разделы проекта</h1>'
+              echo '  <ul>'
+              printf "%b" "$LINKS"
+              echo '  </ul>'
+              echo '</body></html>'
+            } > dist/index.html
           fi
 
       - name: Upload artifact
